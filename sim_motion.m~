@@ -29,13 +29,15 @@ mu_e = G*EM;
 mu_m = 4902.80011526323;
 Re = 6378;
 
-global maint dvTable ref_r ref_i dv_sum dvBurned;
+global maint dvTime ref_r ref_i dv_sum dvMag dv_count window;
 maint = 1; %enable to maintain the equatorial circular orbit around the Moon
-dvTable = [];
-dvBurned = [];
+dvTime = [];
+dvMag = [];
 ref_r = 1500 + MR; %km
 ref_i = 0; %deg
 dv_sum = 0;
+dv_count = 0;
+window = 120; %sec
 
 J2_E  = 0.10826360229840e-02;
 J3_E = -0.25324353457544e-05;
@@ -50,7 +52,7 @@ J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
 %te = 86400*180;
-te = 86400*5;
+te = 70000;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
 syms mu x y z r Rs J2s J3s J4s J5s;
@@ -124,8 +126,8 @@ x0 = [Sat_x0';Sun_x0';Mercury_x0';Venus_x0';Earth_x0';Moon_x0';Mars_x0';...
 v0 = [Sat_v0';Sun_v0';Mercury_v0';Venus_v0';Earth_v0';Moon_v0';Mars_v0';...
     Jupiter_v0';Saturn_v0';Uranus_v0';Neptune_v0'];
 X0 = [x0;v0;];
-tspan = linspace(0,te,te/60);
-[T_J,E_J] = ode45(@grav_J,tspan,X0,options);
+dt = te/(te/60-1);
+[T_J,E_J] = ode_helper(@grav_J,0,te,dt,X0,options);
 
 Sat_X = getv(E_J,'Sat','r');
 Sun_X = getv(E_J,'Sun','r');
@@ -199,9 +201,11 @@ rs = zeros(1,length(Sat_X));
 is = zeros(1,length(Sat_X));
 es = zeros(1,length(Sat_X));
 mis = zeros(1,length(Sat_X));
+vs = zeros(1,length(Sat_V));
 for k = 1:length(Sat_X)
     r = Sat_X(k,:) - Moon_X(k,:);
     v = Sat_V(k,:) - Moon_V(k,:);
+    vs(k) = norm(v);
     rs(k) = norm(r)-MR;
     
     h = cross(r,v);
@@ -215,25 +219,101 @@ for k = 1:length(Sat_X)
 end
 
 figure;
-subplot(3,1,1);
-plot(T_J./3600./86400,rs);
+subplot(4,1,1);
+plot(T_J./3600,rs);
 xlabel('Time (days)');
 ylabel('Altitude (km)');
 
-subplot(3,1,2);
+subplot(4,1,2);
 plot(T_J./3600./86400,es);
 xlabel('Time (days)');
 ylabel('Eccentricity');
 
-subplot(3,1,3);
+subplot(4,1,3);
 plot(T_J./3600./86400,is);
 xlabel('Time (days)');
 ylabel('Inclination (deg)');
 
+subplot(4,1,4);
+plot(T_J,vs);
+xlabel('Time (days)');
+ylabel('Velocity (km/s)');
+
 %% Functions
+function [T,X] = ode_helper(handle,start_time,stop_time,dt,X0g,options)
+global maint dvTime dvMag dv_sum dv_count;
+T = [];
+X = [];
+if (maint)
+    tend = stop_time;
+    t_sim = 0;
+    
+    per10 = (stop_time - start_time)/10;
+    init_tspan = start_time:dt:per10;
+    [tio,Xio] = ode45(handle,init_tspan,X0g,options);
+    while (t_sim < tend)
+        if (isempty(dvTime))
+            if (~isempty(T))
+                    fprintf('EM T end: %.3f tio start: %.3f t_sim: %.3f tio end: %.3f\n',T(end),tio(1),t_sim,tio(end));
+            end
+            if (isempty(T) || T(end) < tio(end))
+                T = [T;tio];
+                X = [X;Xio];
+                t_sim = tio(end);
+            end
+            
+            tspan = t_sim:dt:(t_sim+per10);
+            X0 = X(end,:);
+            [tio,Xio] = ode45(handle,tspan,X0,options);
+        else
+            while (~isempty(dvTime))
+                fprintf('dvTime empty: %i\n',isempty(dvTime));
+                %Sim up to burn
+                nbt = dvTime(1);
+                fprintf('Next burn at %.3f\n',nbt);
+                n = (nbt-t_sim)/dt+1;
+                tspan = linspace(t_sim,nbt,n);
+                if (isempty(X))
+                    X0 = X0g;
+                else
+                    X0 = X(end,:);
+                end
+                
+                [tio,Xio] = ode45(handle,tspan,X0,options);
+                fprintf('tio start: %.3f t_sim: %.3f tio end: %.3f\n',tio(1),t_sim,tio(end));
+                if (~isempty(T))
+                    fprintf('BURN T end: %.3f\n',T(end));
+                end
+                T = [T;tio];
+                X = [X;Xio];
+                t_sim = tio(end);
+                
+                %Apply burn
+                Sat_v = getv(X(end,:),'Sat','v');
+                Moon_v = getv(X(end,:),'Moon','v');
+                v = Sat_v - Moon_v;
+                dv_mag = dvMag(1);
+                dv = dv_mag.*v./norm(v);
+                Sat_v = Sat_v + dv;
+                X(end,34:36) = Sat_v;
+                
+                %Remove burn
+                dvTime(1) = [];
+                dvMag(1) = [];
+                dv_sum = dv_sum + dv_mag;
+                dv_count = dv_count +1;
+            end
+        end
+    end
+else
+    gtspan = start_time:dt:stop_time;
+    [T,X] = ode45(handle,gtspan,X0,options);
+end
+end
+
 function Xdot = grav_J(t,x)
 global PM mu_e Fx Fy Fz Re J_E J_M MR mu_m;
-global maint dvTable ref_r ref_i dv_sum dvBurned;
+global maint dvTime dvMag ref_r ref_i;
 
 Xdot = zeros(66,1);
 x = x';
@@ -255,7 +335,7 @@ X = [Sat_X;Sun_X;Mercury_X;Venus_X;Earth_X;Moon_X;Mars_X;Jupiter_X;Saturn_X;...
 M = PM;
 a = calc_accel(M,X);
 
-Xdot(4:33) = x(37:66);
+Xdot(1:33) = x(34:66);
 
 %% J2 and J3 perturbation from Earth
 J2_E = J_E(1);
@@ -297,7 +377,6 @@ Xdot(61:63) = a(10,:); %uranus
 Xdot(64:66) = a(11,:); %neptune
 
 if (maint)
-    
     r = Sat_X - Moon_X;
     v = getv(x,'Sat','v') - getv(x,'Moon','v');
     h = cross(r,v);
@@ -308,19 +387,7 @@ if (maint)
     i = si - mi; %deg
     
     rn = norm(r);
-    if (~isempty(dvTable))
-        nb = dvTable(end);
-    else
-        tdv.time = -100;
-        tdv.dv_mag = 0;
-        nb = tdv;
-    end
-    
-    if (~isempty(dvBurned))
-        lb = dvBurned(end);
-    end
-    
-    if (rn < ref_r - 1 && (isempty(dvTable)) %need to boost the radius
+    if (rn < ref_r - 1 && isempty(dvTime)) %need to boost the radius
         ra = ref_r;
         a = (rn + ra)/2;
         vp = sqrt(2*mu_m/rn - 1/a);
@@ -330,29 +397,10 @@ if (maint)
         dv2 = (sqrt(mu_m/ra) - va);
         T = pi*a^1.5/sqrt(mu_m);
         
-        %Store dv2
-        dv.dv_mag = dv2;
-        dv.time = t+T;
-        dvTable = [dvTable dv];
-        
-        %Apply dv1
-        Xdot(1:3) = dv1.*v./norm(v) + v + getv(x,'Moon','v');
-        dv_sum = dv_sum + dv1;
-    elseif (nb.time ~= -100 && t < nb.time + 60 && t > nb.time - 60)
-        if (isempty(dvBurned) || ~isempty(dvBurned) && nb.time ~= lb.time)
-            %Apply dv2
-            dv2 = nb.dv_mag;
-            Xdot(1:3) = dv2.*v./norm(v) + v + getv(x,'Moon','v');
-            dv_sum = dv_sum + dv2;
-        
-            dvBurned = [dvBurned nb];
-        else
-            Xdot(1:3) = x(34:36);
-        end
-    else
-        Xdot(1:3) = x(34:36);
+        %Store dv1 and dv2
+        dvTime = [t,t+T];
+        dvMag = [dv1,dv2];
+        fprintf('Burn 1 at %.3f and Burn 2 at %.3f\n',t,t+T);
     end
-else
-    Xdot(1:3) = x(34:36);
 end
 end

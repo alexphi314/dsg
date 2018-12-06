@@ -1,6 +1,6 @@
 function out = getv(x,plan,type)
-% get_r(x,num)
-% Given vector x and number in matrix, return radius vector
+% get_r(x,num,type)
+% Given vector x and number in matrix, return vector
 
 switch plan
     case 'Sun'

@@ -1,0 +1,4 @@
+function i = burn_planned(t,dvTable)
+% i = burn_planned(t,dvTable)
+% If 
+end

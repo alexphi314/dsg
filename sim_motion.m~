@@ -29,15 +29,13 @@ mu_e = G*EM;
 mu_m = 4902.80011526323;
 Re = 6378;
 
-global maint dvTable ref_r ref_i dv_sum dvBurned dv_count window;
+global maint dvTable ref_r ref_i dv_sum dvBurned;
 maint = 1; %enable to maintain the equatorial circular orbit around the Moon
 dvTable = [];
 dvBurned = [];
 ref_r = 1500 + MR; %km
 ref_i = 0; %deg
 dv_sum = 0;
-dv_count = 0;
-window = 120; %sec
 
 J2_E  = 0.10826360229840e-02;
 J3_E = -0.25324353457544e-05;
@@ -52,7 +50,7 @@ J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
 %te = 86400*180;
-te = 10000;
+te = 86400*5;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
 syms mu x y z r Rs J2s J3s J4s J5s;
@@ -201,11 +199,9 @@ rs = zeros(1,length(Sat_X));
 is = zeros(1,length(Sat_X));
 es = zeros(1,length(Sat_X));
 mis = zeros(1,length(Sat_X));
-vs = zeros(1,length(Sat_V));
 for k = 1:length(Sat_X)
     r = Sat_X(k,:) - Moon_X(k,:);
     v = Sat_V(k,:) - Moon_V(k,:);
-    vs(k) = norm(v);
     rs(k) = norm(r)-MR;
     
     h = cross(r,v);
@@ -219,39 +215,25 @@ for k = 1:length(Sat_X)
 end
 
 figure;
-subplot(4,1,1);
-plot(T_J./3600,rs);
+subplot(3,1,1);
+plot(T_J./3600./86400,rs);
 xlabel('Time (days)');
 ylabel('Altitude (km)');
 
-subplot(4,1,2);
+subplot(3,1,2);
 plot(T_J./3600./86400,es);
 xlabel('Time (days)');
 ylabel('Eccentricity');
 
-subplot(4,1,3);
+subplot(3,1,3);
 plot(T_J./3600./86400,is);
 xlabel('Time (days)');
 ylabel('Inclination (deg)');
 
-subplot(4,1,4);
-plot(T_J,vs);
-xlabel('Time (days)');
-ylabel('Velocity (km/s)');
-
 %% Functions
-function [T,X] = ode_helper(handle,gtspan,X0,options)
-global maint dvTable dv_sum dvBurned dv_count window;
-if (maint)
-    foo = 1;
-else
-    [T,X] = ode45(handle,gtspan,X0,options);
-end
-end
-
 function Xdot = grav_J(t,x)
 global PM mu_e Fx Fy Fz Re J_E J_M MR mu_m;
-global maint dvTable ref_r ref_i dv_sum dvBurned dv_count window;
+global maint dvTable ref_r ref_i dv_sum dvBurned;
 
 Xdot = zeros(66,1);
 x = x';
@@ -326,13 +308,19 @@ if (maint)
     i = si - mi; %deg
     
     rn = norm(r);
-    %bp = burn_planned(t,dvTable);
-    
     if (~isempty(dvTable))
         nb = dvTable(end);
+    else
+        tdv.time = -100;
+        tdv.dv_mag = 0;
+        nb = tdv;
     end
     
-    if (rn < ref_r - 1 && isempty(dvTable)) %need to boost the radius
+    if (~isempty(dvBurned))
+        lb = dvBurned(end);
+    end
+    
+    if (rn < ref_r - 1 && (isempty(dvTable)) %need to boost the radius
         ra = ref_r;
         a = (rn + ra)/2;
         vp = sqrt(2*mu_m/rn - 1/a);
@@ -346,24 +334,21 @@ if (maint)
         dv.dv_mag = dv2;
         dv.time = t+T;
         dvTable = [dvTable dv];
-        dv_count = dv_count + 1;
         
         %Apply dv1
         Xdot(1:3) = dv1.*v./norm(v) + v + getv(x,'Moon','v');
         dv_sum = dv_sum + dv1;
+    elseif (nb.time ~= -100 && t < nb.time + 60 && t > nb.time - 60)
+        if (isempty(dvBurned) || ~isempty(dvBurned) && nb.time ~= lb.time)
+            %Apply dv2
+            dv2 = nb.dv_mag;
+            Xdot(1:3) = dv2.*v./norm(v) + v + getv(x,'Moon','v');
+            dv_sum = dv_sum + dv2;
         
-        fprintf('Executing burn at t %.3f, planned burn at t %.3f\n',...
-        t,dv.time);
-    elseif (~isempty(dvTable) && t > nb.time)
-        %Apply dv2
-        dv2 = nb.dv_mag;
-        Xdot(1:3) = dv2.*v./norm(v) + v + getv(x,'Moon','v');
-        dv_sum = dv_sum + dv2;
-
-        dvBurned = [dvBurned nb];
-        dvTable(end) = [];
-        fprintf('Executing burn at t %.3f\n',...
-        t);
+            dvBurned = [dvBurned nb];
+        else
+            Xdot(1:3) = x(34:36);
+        end
     else
         Xdot(1:3) = x(34:36);
     end

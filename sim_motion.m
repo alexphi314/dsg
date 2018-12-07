@@ -29,15 +29,24 @@ mu_e = G*EM;
 mu_m = 4902.80011526323;
 Re = 6378;
 
-global maint dvTime ref_r ref_i dv_sum dvMag dv_count window;
+global maint dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is;
 maint = 1; %enable to maintain the equatorial circular orbit around the Moon
 dvTime = [];
 dvMag = [];
+dvType = [];
 ref_r = 1500 + MR; %km
 ref_i = 0; %deg
 dv_sum = 0;
 dv_count = 0;
-window = 120; %sec
+last_burn = 0;
+avg_rs = zeros(1,10);
+avg_is = zeros(1,10);
+
+if (maint)
+    mt = 'maint';
+else
+    mt = '';
+end
 
 J2_E  = 0.10826360229840e-02;
 J3_E = -0.25324353457544e-05;
@@ -51,8 +60,9 @@ J5_M = 2.2378531356778999e-07;
 J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
+te = 86400*5;
 %te = 86400*180;
-te = 70000;
+dt = 60;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
 syms mu x y z r Rs J2s J3s J4s J5s;
@@ -126,7 +136,6 @@ x0 = [Sat_x0';Sun_x0';Mercury_x0';Venus_x0';Earth_x0';Moon_x0';Mars_x0';...
 v0 = [Sat_v0';Sun_v0';Mercury_v0';Venus_v0';Earth_v0';Moon_v0';Mars_v0';...
     Jupiter_v0';Saturn_v0';Uranus_v0';Neptune_v0'];
 X0 = [x0;v0;];
-dt = te/(te/60-1);
 [T_J,E_J] = ode_helper(@grav_J,0,te,dt,X0,options);
 
 Sat_X = getv(E_J,'Sat','r');
@@ -175,6 +184,8 @@ plot3(Uranus_X(:,1)-Sun_X(:,1),Uranus_X(:,2)-Sun_X(:,2),Uranus_X(:,3)-Sun_X(:,3)
 plot3(Neptune_X(:,1)-Sun_X(:,1),Neptune_X(:,2)-Sun_X(:,2),Neptune_X(:,3)-Sun_X(:,3),...
     'b','DisplayName','Neptune','LineWidth',2);
 legend('location','Northeast');
+fname = sprintf('Plots/%s_all_planets_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
 
 figure;
 hold on; axis equal;
@@ -188,6 +199,8 @@ plot3(Sat_X(:,1)-Earth_X(:,1),Sat_X(:,2)-Earth_X(:,2),Sat_X(:,3)-Earth_X(:,3)...
 hold on;
 h = surf(XS*Re, YS*Re, ZS*Re,'DisplayName','Earth');
 legend('location','Northeast');
+fname = sprintf('Plots/%s_earth_moon_dsg_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
 
 figure;
 hold on; axis equal;
@@ -196,6 +209,15 @@ plot3(Sat_X(:,1)-Moon_X(:,1),Sat_X(:,2)-Moon_X(:,2),Sat_X(:,3)-Moon_X(:,3));
 hold on;
 h = surf(XS*MR, YS*MR, ZS*MR);
 rotate(h,[1,0,0],-mid);
+view(0,125);
+fname = sprintf('Plots/%s_dsg_moon_top_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+view(0,20);
+fname = sprintf('Plots/%s_dsg_moon_front_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+view(3);
+fname = sprintf('Plots/%s_dsg_moon_3d_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
 
 rs = zeros(1,length(Sat_X));
 is = zeros(1,length(Sat_X));
@@ -220,42 +242,41 @@ end
 
 figure;
 subplot(4,1,1);
-plot(T_J./3600,rs);
+plot(T_J./86400,rs);
 xlabel('Time (days)');
 ylabel('Altitude (km)');
 
 subplot(4,1,2);
-plot(T_J./3600./86400,es);
+plot(T_J./86400,es);
 xlabel('Time (days)');
 ylabel('Eccentricity');
 
 subplot(4,1,3);
-plot(T_J./3600./86400,is);
+plot(T_J./86400,is);
 xlabel('Time (days)');
 ylabel('Inclination (deg)');
 
 subplot(4,1,4);
-plot(T_J,vs);
+plot(T_J./86400,vs);
 xlabel('Time (days)');
 ylabel('Velocity (km/s)');
+fname = sprintf('Plots/%s_r_e_i_v_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
 
 %% Functions
 function [T,X] = ode_helper(handle,start_time,stop_time,dt,X0g,options)
-global maint dvTime dvMag dv_sum dv_count;
+global maint dvTime dvMag dvType dv_sum dv_count;
 T = [];
 X = [];
 if (maint)
     tend = stop_time;
     t_sim = 0;
     
-    per10 = (stop_time - start_time)/10;
+    per10 = (stop_time - start_time)/5;
     init_tspan = start_time:dt:per10;
     [tio,Xio] = ode45(handle,init_tspan,X0g,options);
     while (t_sim < tend)
         if (isempty(dvTime))
-            if (~isempty(T))
-                    fprintf('EMPTY T end: %.3f tio start: %.3f t_sim: %.3f tio end: %.3f\n',T(end),tio(1),t_sim,tio(end));
-            end
             if (isempty(T) || T(end) < tio(end))
                 T = [T;tio];
                 X = [X;Xio];
@@ -272,15 +293,24 @@ if (maint)
                 sim_end = t_sim+per10;
                 n = (sim_end-t_sim)/dt+1;
             end
+            %fprintf('empty t_sim %.3f tio_end: %.3f end: %.3f\n',t_sim,tio(end),sim_end);
+%             if (~isempty(T))
+%                 fprintf('T end %.3f\n',T(end));
+%             end
             tspan = linspace(t_sim,sim_end,n);
             X0 = X(end,:);
             [tio,Xio] = ode45(handle,tspan,X0,options);
         else
             while (~isempty(dvTime))
-                fprintf('dvTime empty: %i\n',isempty(dvTime));
                 %Sim up to burn
                 nbt = dvTime(1);
-                fprintf('Next burn at %.3f\n',nbt);
+                if (nbt == t_sim)
+                    dvTime = [];
+                    dvMag = [];
+                    dvType = [];
+                    continue;
+                end
+                
                 n = (nbt-t_sim)/dt+1;
                 tspan = linspace(t_sim,nbt,n);
                 if (isempty(X))
@@ -289,41 +319,57 @@ if (maint)
                     X0 = X(end,:);
                 end
                 
+                %fprintf('BURN t_sim %.3f tio_end: %.3f nbt: %.3f\n',t_sim,tio(end),nbt);
+%                 if (~isempty(T))
+%                     fprintf('T end %.3f\n',T(end));
+%                 end
                 [tio,Xio] = ode45(handle,tspan,X0,options);
-                fprintf('tio start: %.3f t_sim: %.3f tio end: %.3f\n',tio(1),t_sim,tio(end));
-                if (~isempty(T))
-                    fprintf('BURN T end: %.3f\n',T(end));
-                end
                 T = [T;tio];
                 X = [X;Xio];
                 t_sim = tio(end);
                 
-                %Apply burn
-                Sat_v = getv(X(end,:),'Sat','v');
-                Moon_v = getv(X(end,:),'Moon','v');
-                v = Sat_v - Moon_v;
-                dv_mag = dvMag(1);
-                dv = dv_mag.*v./norm(v);
-                Sat_v = Sat_v + dv;
-                X(end,34:36) = Sat_v;
+                type = dvType(1);
+                if (type == 'r')
+                    %Apply burn
+                    %fprintf('Burned at %.3f\n',t_sim);
+                    Sat_v = getv(X(end,:),'Sat','v');
+                    Moon_v = getv(X(end,:),'Moon','v');
+                    v = Sat_v - Moon_v;
+                    dv_mag = dvMag(1);
+                    dv = dv_mag.*v./norm(v);
+                    Sat_v = Sat_v + dv;
+                    X(end,34:36) = Sat_v;
+                elseif (type == 'i')
+                    r = getv(X(end,:),'Sat','r') - getv(X(end,:),'Moon','r');
+                    v = getv(X(end,:),'Sat','v') - getv(X(end,:),'Moon','v');
+                    h = cross(r,v);
+                    
+                    dv_mag = dvMag(1);
+                    dv = -dv_mag.*h./norm(h);
+                    Sat_v = getv(X(end,:),'Sat','v') + dv;
+                    X(end,34:36) = Sat_v;
+                end
                 
                 %Remove burn
                 dvTime(1) = [];
                 dvMag(1) = [];
+                dvType(1) = [];
+                last_burn = t_sim;
                 dv_sum = dv_sum + dv_mag;
                 dv_count = dv_count +1;
             end
         end
     end
 else
-    gtspan = start_time:dt:stop_time;
-    [T,X] = ode45(handle,gtspan,X0,options);
+    n = (stop_time-start_time)/dt+1;
+    gtspan = linspace(start_time,stop_time,n);
+    [T,X] = ode45(handle,gtspan,X0g,options);
 end
 end
 
 function Xdot = grav_J(t,x)
 global PM mu_e Fx Fy Fz Re J_E J_M MR mu_m;
-global maint dvTime dvMag ref_r ref_i;
+global maint dvTime dvMag ref_r ref_i last_burn avg_rs avg_is dvType;
 
 Xdot = zeros(66,1);
 x = x';
@@ -396,21 +442,44 @@ if (maint)
     mi = acos(dot(hm,[0,0,1])/norm(hm))*180/pi;
     i = si - mi; %deg
     
+    [dec,~] = r_to_angles(r);
+    dec = dec*180./pi; %deg
+    
+    avg_rs(1) = [];
+    avg_rs(10) = norm(r);
+    
+    avg_is(1) = [];
+    avg_is(10) = i;
     rn = norm(r);
-    if (rn < ref_r - 1 && isempty(dvTime)) %need to boost the radius
-        ra = ref_r;
+    if (mean(avg_rs) < ref_r - 2 && isempty(dvTime) && t-last_burn > 300) %need to boost the radius
+        ra = ref_r+1;
         a = (rn + ra)/2;
-        vp = sqrt(2*mu_m/rn - 1/a);
-        va = sqrt(2*mu_m/ra - 1/a);
+        vp = sqrt(2*mu_m/rn - mu_m/a);
+        va = sqrt(2*mu_m/ra - mu_m/a);
         
-        dv1 = (vp - norm(v));
+        dv1 = vp - sqrt(mu_m/rn);
         dv2 = (sqrt(mu_m/ra) - va);
         T = pi*a^1.5/sqrt(mu_m);
         
         %Store dv1 and dv2
         dvTime = [t,t+T];
         dvMag = [dv1,dv2];
-        fprintf('Burn 1 at %.3f and Burn 2 at %.3f\n',t,t+T);
+        dvType = ['r','r'];
+        fprintf('Burn 1 at %.3f and Burn 2 at %.3f\n',t./86400,(t+T)./86400);
+    elseif (mean(avg_is) > 0.5 && isempty(dvTime) && t-last_burn > 300 ...
+            && dec < 0.01 && dec > -0.01) 
+        dv = 2*norm(v)*sind(i/2);
+        
+        e = cross(v,h)./mu_m - r./norm(r);
+        P = norm(h)^2./mu_m;
+        ra = P./(1-norm(e));
+        a = ra./(1+norm(e));
+        T = pi*a^1.5/sqrt(mu_m);
+        
+        dvTime = [t,t+T];
+        dvMag = [dv/2,-dv/2];
+        dvType = ['i','i'];
+        fprintf('Inc Burn at %.3f and %.3f\n',t./86400,(t+T)./86400);
     end
 end
 end

@@ -27,10 +27,11 @@ n = sqrt(G*(EM+MM)/D^3);
 gray = [128,139,150];
 mu_e = G*EM;
 mu_m = 4902.80011526323;
+mu_s = G*SM;
 Re = 6378;
 
 global maint dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is;
-maint = 1; %enable to maintain the equatorial circular orbit around the Moon
+maint = 0; %enable to maintain the equatorial circular orbit around the Moon
 dvTime = [];
 dvMag = [];
 dvType = [];
@@ -60,8 +61,8 @@ J5_M = 2.2378531356778999e-07;
 J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
-%te = 86400*5;
-te = 86400*365.25;
+te = 86400*180;
+%te = 86400*365.25;
 dt = 60;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
@@ -262,6 +263,94 @@ xlabel('Time (days)');
 ylabel('Velocity (km/s)');
 fname = sprintf('Plots/%s_r_e_i_v_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
+
+tofs = linspace(3*86400,10*86400,20);
+times = 1:2880:length(T_J);
+[X,Y] = meshgrid(T_J(times),tofs);
+%Define circular parking orbit, 200 km altitude
+ri = Re + 200;
+vi = sqrt(mu_e/ri);
+ri_p = [ri,0,0]';
+vi_p = [0,vi,0]';
+Op_g = peri2geo(0,0,0);
+ri_J = Op_g*ri_p;
+vi_p = Op_g*vi_p;
+
+satdvs = zeros(size(Y));
+for k = 1:size(X,2)
+    for j = 1:size(Y,1)
+        %Calculate Earth to DSG delta-V
+        %fprintf('%i: Solving lambert prob with tof %.3f\n',k,tofs(j));
+        indx = times(k);
+        rdsg = Sat_X(indx,:) - Earth_X(indx,:);
+        sv = Sat_V(indx,:) - Earth_V(indx,:);
+        [Vi,Vf] = lambertProblemBasicSolution(mu_e,ri_J',rdsg,Y(j));
+        satdvs(j,k) = abs(norm(Vi) - norm(vi_p)) + abs(norm(Vf) - norm(sv));
+    end
+end
+
+tofs = linspace(0.5*365.25*86400,1.5*365.25*86400,100);
+times = 1:2880:length(T_J);
+[X2,Y2] = meshgrid(T_J(times),tofs);
+emdvs = zeros(size(Y2));
+mmdvs = zeros(size(Y2));
+for k = 1:size(X2,2)
+    for j = 1:size(Y2,1)
+        indx = times(k);
+        rdsg = Sat_X(indx,:);
+        sv = Sat_V(indx,:);
+        
+        ris = ri_J' + Earth_X(indx,:);
+        vis = vi_p' + Earth_V(indx,:);
+        
+        [emVi,emVf] = lambertProblemBasicSolution(mu_s,ris,Mars_X(indx,:),Y2(j));
+        emdv = abs(norm(emVi)-norm(vis)) + abs(norm(emVf)-norm(Mars_V(indx,:)));
+        
+        [mmVi,mmVf] = lambertProblemBasicSolution(mu_s,Sat_X(indx,:),Mars_X(indx,:),Y2(j));
+        mmdv = abs(norm(mmVi)-norm(Sat_V(indx,:))) + abs(norm(mmVf)-norm(Mars_V(indx,:)));
+        
+        emdvs(j,k) = emdv;
+        mmdvs(j,k) = mmdv;
+    end
+end
+
+figure;
+contourf(X./86400,Y./86400,satdvs);
+c = colorbar;
+c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('Earth to DSG Transfer');
+fname = sprintf('Plots/%s_earth_dsg_dv_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
+figure;
+contourf(X2./86400,Y2./86400,emdvs);
+c = colorbar;c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('Earth to Mars Transfer');
+fname = sprintf('Plots/%s_earth_Mars_dv_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
+figure;
+contourf(X2./86400,Y2./86400,mmdvs);
+c = colorbar;c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('DSG to Mars Transfer');
+fname = sprintf('Plots/%s_dsg_Mars_dv_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
+figure;
+contourf(X2./86400,Y2./86400,mmdvs-emdvs);
+c = colorbar;c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('Delta-V Savings on Transfer from DSG to Mars vs. Earth to Mars');
+fname = sprintf('Plots/%s_diff_dvs_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
 
 %% Functions
 function [T,X] = ode_helper(handle,start_time,stop_time,dt,X0g,options)

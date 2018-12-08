@@ -299,9 +299,9 @@ fname = sprintf('Plots/%s_r_e_i_v_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
 figure;
-plot(pdv_t./86400,pdv_m);
+plot(pdv_t./86400,pdv_m.*1000);
 xlabel('Time (days)');
-ylabel('Delta-V Total (km/s)');
+ylabel('Delta-V Total (m/s)');
 fname = sprintf('Plots/%s_time_dv_sum_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 

@@ -1,8 +1,0 @@
-function [C,S] = import_CS()
-% [C,S] = import_CS()
-% Return matrix of C coefficients and S coefficients
-
-data = csvread('ggrx_1200a_sha.tab.txt');
-foo = 1;
-
-end

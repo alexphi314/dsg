@@ -3,7 +3,7 @@ clear;
 close all;
 
 %Initial conditions
-global rho mu_m PM Re mu_e J_E J_M Fx Fy Fz MR;
+global rho mu_m PM Re mu_e J_E J_M Fx Fy Fz MR sa_A;
 % Planet Masses
 SM = 1.989e30;
 MerM = 330.2e21;
@@ -29,9 +29,10 @@ mu_e = G*EM;
 mu_m = 4902.80011526323;
 mu_s = G*SM;
 Re = 6378;
+sa_A = 625; %m2, area of solar array on DSG (1/4 ISS solar area area)
 
-global maint dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is;
-maint = 0; %enable to maintain the equatorial circular orbit around the Moon
+global maint dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is avg_es;
+maint = 1; %enable to maintain the equatorial circular orbit around the Moon
 dvTime = [];
 dvMag = [];
 dvType = [];
@@ -42,6 +43,7 @@ dv_count = 0;
 last_burn = 0;
 avg_rs = zeros(1,10);
 avg_is = zeros(1,10);
+avg_es = zeros(1,10);
 
 if (maint)
     mt = 'maint';
@@ -61,8 +63,8 @@ J5_M = 2.2378531356778999e-07;
 J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
-te = 86400*5;
-%te = 86400*365.25;
+%te = 86400*180;
+te = 86400*310;
 dt = 60;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
@@ -265,7 +267,7 @@ fname = sprintf('Plots/%s_r_e_i_v_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
 tofs = linspace(3*86400,10*86400,10);
-times = 1:1440:length(T_J);
+times = 1:(5*86400/60):length(T_J);
 [X,Y] = meshgrid(T_J(times),tofs);
 %Define circular parking orbit, 200 km altitude
 ri = Re + 200;
@@ -277,6 +279,7 @@ ri_J = Op_g*ri_p;
 vi_p = Op_g*vi_p;
 
 satdvs = zeros(size(Y));
+fprintf('Generating Earth to DSV delta-V matrix\n');
 for k = 1:size(X,2)
     for j = 1:size(Y,1)
         %Calculate Earth to DSG delta-V
@@ -284,38 +287,85 @@ for k = 1:size(X,2)
         indx = times(k);
         rdsg = Sat_X(indx,:) - Earth_X(indx,:);
         sv = Sat_V(indx,:) - Earth_V(indx,:);
-        [Vi,Vf] = lambertProblemBasicSolution(mu_e,ri_J',rdsg,Y(j));
+        try
+            [Vi,Vf] = lambertProblemBasicSolution(mu_e,ri_J',rdsg,Y(j));
+        catch
+            fprintf('1 TOF: %.3f\n',Y(j));
+        end
         satdvs(j,k) = abs(norm(Vi) - norm(vi_p)) + abs(norm(Vf) - norm(sv));
     end
 end
 
-emdvs = zeros(size(Y));
-mmdvs = zeros(size(Y));
-for k = 1:size(X,2)
-    for j = 1:size(Y,1)
+tofs = linspace(0.5*365.25*86400,1.5*365.25*86400,50);
+times = 1:(5*86400/60):length(T_J);
+[X2,Y2] = meshgrid(T_J(times),tofs);
+emdvs = zeros(size(Y2));
+mmdvs = zeros(size(Y2));
+fprintf('Generating Earth to Mars and DSG to Mars delta-V matrices\n');
+for k = 1:size(X2,2)
+    for j = 1:size(Y2,1)
         indx = times(k);
         rdsg = Sat_X(indx,:);
         sv = Sat_V(indx,:);
         
         ris = ri_J' + Earth_X(indx,:);
-        vis = vi_J' + Earth_V(indx,:);
+        vis = vi_p' + Earth_V(indx,:);
         
-        [emVi,emVf] = lambertProblemBasicSolution(mu_s,ris,Mars_X(
+        try
+            [emVi,emVf] = lambertProblemBasicSolution(mu_s,ris,Mars_X(indx,:),Y2(j));
+            emdv = abs(norm(emVi)-norm(vis)) + abs(norm(emVf)-norm(Mars_V(indx,:)));
+        
+            [mmVi,mmVf] = lambertProblemBasicSolution(mu_s,Sat_X(indx,:),Mars_X(indx,:),Y2(j));
+            mmdv = abs(norm(mmVi)-norm(Sat_V(indx,:))) + abs(norm(mmVf)-norm(Mars_V(indx,:)));
+        
+        catch
+            continue;
+        end
+        emdvs(j,k) = emdv;
+        mmdvs(j,k) = mmdv;
     end
 end
 
+fprintf('Plotting\n');
 figure;
 contourf(X./86400,Y./86400,satdvs);
 c = colorbar;
 c.Label.String = 'Delta-V (km/s)';
 xlabel('Simulation Time (days)');
 ylabel('Transfer Time (days)');
+title('Earth to DSG Transfer');
 fname = sprintf('Plots/%s_earth_dsg_dv_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+figure;
+contourf(X2./86400,Y2./86400,emdvs);
+c = colorbar;c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('Earth to Mars Transfer');
+fname = sprintf('Plots/%s_earth_Mars_dv_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
+figure;
+contourf(X2./86400,Y2./86400,mmdvs);
+c = colorbar;c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('DSG to Mars Transfer');
+fname = sprintf('Plots/%s_dsg_Mars_dv_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
+figure;
+contourf(X2./86400,Y2./86400,mmdvs-emdvs);
+c = colorbar;c.Label.String = 'Delta-V (km/s)';
+xlabel('Simulation Time (days)');
+ylabel('Transfer Time (days)');
+title('Delta-V Savings on Transfer from DSG to Mars vs. Earth to Mars');
+fname = sprintf('Plots/%s_diff_dvs_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
 %% Functions
 function [T,X] = ode_helper(handle,start_time,stop_time,dt,X0g,options)
-global maint dvTime dvMag dvType dv_sum dv_count;
+global maint dvTime dvMag dvType dv_sum dv_count last_burn;
 T = [];
 X = [];
 if (maint)
@@ -398,6 +448,13 @@ if (maint)
                     dv = -dv_mag.*h./norm(h);
                     Sat_v = getv(X(end,:),'Sat','v') + dv;
                     X(end,34:36) = Sat_v;
+                elseif (type == 'e')
+                    r = getv(X(end,:),'Sat','r') - getv(X(end,:),'Moon','r');
+                    %v = getv(X(end,:),'Sat','v') - getv(X(end,:),'Moon','v');
+                    dv_mag = dvMag(1);
+                    dv = dv_mag.*r./norm(r);
+                    Sat_v = getv(X(end,:),'Sat','v') + dv;
+                    X(end,34:36) = Sat_v;
                 end
                 
                 %Remove burn
@@ -418,8 +475,8 @@ end
 end
 
 function Xdot = grav_J(t,x)
-global PM mu_e Fx Fy Fz Re J_E J_M MR mu_m;
-global maint dvTime dvMag ref_r ref_i last_burn avg_rs avg_is dvType;
+global PM mu_e Fx Fy Fz Re J_E J_M MR mu_m sa_A;
+global maint dvTime dvMag ref_r ref_i last_burn avg_rs avg_is dvType avg_es;
 
 Xdot = zeros(66,1);
 x = x';
@@ -443,6 +500,24 @@ a = calc_accel(M,X);
 
 Xdot(1:33) = x(34:66);
 
+%% SRP
+Ps = 4.56e-6; %N/m2
+ep = 0.21;
+rs = Sat_X - Sun_X; %km
+AU = 149.597870691e6;
+es = rs./norm(rs);
+F_srp = -Ps*AU^2/norm(rs)^2*sa_A*(1+ep).*es; %N
+F_srp = F_srp/1000; %kN
+%F_srp = 0;
+
+%Calculate if DSG is in eclipse
+rm = Sat_X - Moon_X;
+tsm = acos(dot(rs,rm)/norm(rs)/norm(rm));
+dist = norm(rm)*sin(tsm);
+if (dist < MR)
+    F_srp = 0;
+end
+
 %% J2 and J3 perturbation from Earth
 J2_E = J_E(1);
 J3_E = J_E(2);
@@ -465,7 +540,7 @@ Sat_grav_je = [Fx(J2_E,J3_E,J4_E,J5_E,Re,mu_e,rn,xp,y,z),...
 Sat_grav_jm = [Fx(J2_M,J3_M,J4_M,J5_M,MR,mu_m,rn,xp,y,z),...
     Fy(J2_M,J3_M,J4_M,J5_M,MR,mu_m,rn,xp,y,z),...
     Fz(J2_M,J3_M,J4_M,J5_M,MR,mu_m,rn,xp,y,z)];
-Xdot(34:36) = Sat_grav_a + Sat_grav_je + Sat_grav_jm; %sat
+Xdot(34:36) = Sat_grav_a + Sat_grav_je + Sat_grav_jm + F_srp./PM(1); %sat
 Xdot(37:39) = a(2,:); %sun
 Xdot(40:42) = a(3,:); %mercury
 Xdot(43:45) = a(4,:); %venus
@@ -491,6 +566,8 @@ if (maint)
     hm = cross(Moon_X,getv(x,'Moon','v'));
     mi = acos(dot(hm,[0,0,1])/norm(hm))*180/pi;
     i = si - mi; %deg
+    e = cross(v,h)./mu_m - r./norm(r);
+    thet = acosd(dot(r,e)./norm(r)./norm(e));
     
     [dec,~] = r_to_angles(r);
     dec = dec*180./pi; %deg
@@ -500,8 +577,12 @@ if (maint)
     
     avg_is(1) = [];
     avg_is(10) = i;
+    
+    avg_es(1) = [];
+    avg_es(10) = norm(e);
     rn = norm(r);
-    if (mean(avg_rs) < ref_r - 2 && isempty(dvTime) && t-last_burn > 300) %need to boost the radius
+    if (mean(avg_rs) < ref_r - 2 && isempty(dvTime) && t-last_burn > 300 ...
+            && mean(avg_es) < 0.02) %need to boost the radius
         ra = ref_r+1;
         a = (rn + ra)/2;
         vp = sqrt(2*mu_m/rn - mu_m/a);
@@ -520,16 +601,37 @@ if (maint)
             && dec < 0.01 && dec > -0.01) 
         dv = 2*norm(v)*sind(i/2);
         
-        e = cross(v,h)./mu_m - r./norm(r);
         P = norm(h)^2./mu_m;
         ra = P./(1-norm(e));
         a = ra./(1+norm(e));
         T = pi*a^1.5/sqrt(mu_m);
         
+        % This is a horrible hack but the signs for this inclination burn
+        % are wrong and I don't know why
+        if (t < 309*86400 && t > 308*86400)
+            dv = -dv;
+        end
         dvTime = [t,t+T];
         dvMag = [dv/2,-dv/2];
         dvType = ['i','i'];
         fprintf('Inc Burn at %.3f and %.3f\n',t./86400,(t+T)./86400);
+    elseif (mean(avg_es) > 0.02 && isempty(dvTime) && t-last_burn > 300 ...
+            && thet > -5 && thet < 5)
+        circ_v = sqrt(mu_m./rn);
+        P = norm(h)^2./mu_m;
+        ra = P./(1-norm(e));
+        va = h./ra;
+        
+        dv1 = abs(circ_v - norm(v));
+        dv2 = sqrt(mu_m./ra) - norm(va);
+        
+        new_E = 0.5*circ_v^2 - mu_m./rn;
+        new_a = -mu_m./new_E./2;
+        T = pi*new_a^1.5/sqrt(mu_m);
+        dvTime = [t,t+T];
+        dvMag = [dv1,dv2];
+        dvType = ['e','e'];
+        fprintf('Eccentricity Burn at %.3f and %.3f\n',t./86400,(t+T)./86400);
     end
 end
 end

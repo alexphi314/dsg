@@ -1,0 +1,12 @@
+function U = gen_pot(p)
+% U = gen_pot(p)
+%     p -> max degree of gravity field
+%     U -> symbolic expression for potential
+
+U = 0;
+for n = 0:p
+    for m = 0:n
+        P = legendre(n,m)
+    end
+end
+end

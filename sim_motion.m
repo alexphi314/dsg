@@ -3,7 +3,7 @@ clear;
 close all;
 
 %Initial conditions
-global rho mu_m PM Re mu_e J_E J_M Fx Fy Fz MR sa_A;
+global rho mu_m PM Re mu_e J_E J_M FMx FMy FMz MR sa_A FEx FEy FEz;
 % Planet Masses
 SM = 1.989e30;
 MerM = 330.2e21;
@@ -31,8 +31,10 @@ mu_s = G*SM;
 Re = 6378;
 sa_A = 625; %m2, area of solar array on DSG (1/4 ISS solar area area)
 
-global maint dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is avg_es;
+global maint grav_type dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is avg_es;
+global pdv_t pdv_m;
 maint = 1; %enable to maintain the equatorial circular orbit around the Moon
+grav_type = 'j';
 dvTime = [];
 dvMag = [];
 dvType = [];
@@ -44,6 +46,8 @@ last_burn = 0;
 avg_rs = zeros(1,10);
 avg_is = zeros(1,10);
 avg_es = zeros(1,10);
+pdv_t = [0];
+pdv_m = [0];
 
 if (maint)
     mt = 'maint';
@@ -63,27 +67,43 @@ J5_M = 2.2378531356778999e-07;
 J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
-%te = 86400*180;
-te = 86400*310;
+%te = 86400*20;
+te = 86400*365.25;
 dt = 60;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
-syms mu x y z r Rs J2s J3s J4s J5s;
+%% Generate gravity field
+% Import C and S coefficients
+% Degree of field
+s = 5;
+fprintf('Generating %ix%i gravity field\n',s,s);
+[C,S] = import_CS(s);
+UM = gen_pot(C,S,s);
+
+syms x y z r;
 r_eqn = (x^2 + y^2 + z^2)^0.5;
-%U = mu*Res^2/(2*r^3)*J2s*(3*(z/r)^2 - 1) +... 
-%       mu*J3s*Res^3/(2*r^4)*( 5*(z/r)^3 - 3*(z/r) );
+UMx = -(diff(UM,r)*diff(r_eqn,x));
+UMy = -(diff(UM,r)*diff(r_eqn,y));
+UMz = -(diff(UM,r)*diff(r_eqn,z) + diff(UM,z));
+
+FMx = matlabFunction(UMx);
+FMy = matlabFunction(UMy);
+FMz = matlabFunction(UMz);
+
+syms mu Rs J2s J3s J4s J5s;
 p2 = legendre(2,0);
 p3 = legendre(3,0);
 p4 = legendre(4,0);
 p5 = legendre(5,0);
-U = -mu/r*(-J2s*Rs^2/r^2*p2(z/r) - J3s*Rs^3/r^3*p3(z/r) - J4s*Rs^4/r^4*p4(z/r) - J5s*Rs^5/r^5*p5(z/r));
-Ux = -(diff(U,r)*diff(r_eqn,x));
-Uy = -(diff(U,r)*diff(r_eqn,y));
-Uz = -(diff(U,r)*diff(r_eqn,z) + diff(U,z));
+UE = -mu/r*(-J2s*Rs^2/r^2*p2(z/r) - J3s*Rs^3/r^3*p3(z/r) - J4s*Rs^4/r^4*p4(z/r) - J5s*Rs^5/r^5*p5(z/r));
+UEx = -(diff(UE,r)*diff(r_eqn,x));
+UEy = -(diff(UE,r)*diff(r_eqn,y));
+UEz = -(diff(UE,r)*diff(r_eqn,z) + diff(UE,z));
 
-Fx = matlabFunction(Ux);
-Fy = matlabFunction(Uy);
-Fz = matlabFunction(Uz);
+FEx = matlabFunction(UEx);
+FEy = matlabFunction(UEy);
+FEz = matlabFunction(UEz);
+fprintf('Gravity field generated\n');
 
 %% Inertial Frame
 %Assume starting time is 2026-06-01
@@ -227,6 +247,8 @@ is = zeros(1,length(Sat_X));
 es = zeros(1,length(Sat_X));
 mis = zeros(1,length(Sat_X));
 vs = zeros(1,length(Sat_V));
+j1s = zeros(1,length(Sat_X));
+j2s = zeros(1,length(Sat_X));
 for k = 1:length(Sat_X)
     r = Sat_X(k,:) - Moon_X(k,:);
     v = Sat_V(k,:) - Moon_V(k,:);
@@ -241,6 +263,16 @@ for k = 1:length(Sat_X)
     hm = cross(Moon_X(k,:),Moon_V(k,:));
     mi = acos(dot(hm,[0,0,1])/norm(hm))*180/pi;
     is(k) = si-mi;
+    
+%     j1 = [FMx(MR,mu_m,norm(r),r(1),r(2),r(3)),...
+%     FMy(MR,mu_m,norm(r),r(1),r(2),r(3)),...
+%     FMz(MR,mu_m,norm(r),r(1),r(2),r(3))];
+%     j2 = [FEx(J2_M,J3_M,J4_M,J5_M,MR,mu_m,norm(r),r(1),r(2),r(3)),...
+%     FEy(J2_M,J3_M,J4_M,J5_M,MR,mu_m,norm(r),r(1),r(2),r(3)),...
+%     FEz(J2_M,J3_M,J4_M,J5_M,MR,mu_m,norm(r),r(1),r(2),r(3))];
+
+    %j1s(k) = norm(j1);
+    %j2s(k) = norm(j2);
 end
 
 figure;
@@ -265,6 +297,18 @@ xlabel('Time (days)');
 ylabel('Velocity (km/s)');
 fname = sprintf('Plots/%s_r_e_i_v_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
+
+figure;
+plot(pdv_t./86400,pdv_m);
+xlabel('Time (days)');
+ylabel('Delta-V Total (km/s)');
+fname = sprintf('Plots/%s_time_dv_sum_%i.png',mt,round(te/86400));
+print(fname,'-dpng');
+
+%figure; hold on;
+%plot(j1s,'DisplayName','Full Gravity Field');
+%plot(j2s,'DisplayName','J gravity field');
+%legend('location','northeast');
 
 tofs = linspace(3*86400,10*86400,10);
 times = 1:(5*86400/60):length(T_J);
@@ -366,6 +410,7 @@ print(fname,'-dpng');
 %% Functions
 function [T,X] = ode_helper(handle,start_time,stop_time,dt,X0g,options)
 global maint dvTime dvMag dvType dv_sum dv_count last_burn;
+global pdv_t pdv_m;
 T = [];
 X = [];
 if (maint)
@@ -457,6 +502,10 @@ if (maint)
                     X(end,34:36) = Sat_v;
                 end
                 
+                %Track burn for plotting
+                pdv_t = [pdv_t t_sim];
+                pdv_m = [pdv_m pdv_m(end)+abs(dvMag(1))];
+                
                 %Remove burn
                 dvTime(1) = [];
                 dvMag(1) = [];
@@ -464,6 +513,8 @@ if (maint)
                 last_burn = t_sim;
                 dv_sum = dv_sum + dv_mag;
                 dv_count = dv_count +1;
+                
+                
             end
         end
     end
@@ -475,8 +526,8 @@ end
 end
 
 function Xdot = grav_J(t,x)
-global PM mu_e Fx Fy Fz Re J_E J_M MR mu_m sa_A;
-global maint dvTime dvMag ref_r ref_i last_burn avg_rs avg_is dvType avg_es;
+global PM mu_e FEx FEy FEz Re J_E J_M MR mu_m sa_A FMx FMy FMz;
+global maint grav_type dvTime dvMag ref_r ref_i last_burn avg_rs avg_is dvType avg_es;
 
 Xdot = zeros(66,1);
 x = x';
@@ -530,16 +581,24 @@ J5_M = J_M(4);
 
 Sat_grav_a = a(1,:); %gravitational accel
 ESR = Sat_X - Earth_X;
-xp = ESR(1);
-y = ESR(2);
-z = ESR(3);
-rn = norm(ESR);
-Sat_grav_je = [Fx(J2_E,J3_E,J4_E,J5_E,Re,mu_e,rn,xp,y,z),...
-    Fy(J2_E,J3_E,J4_E,J5_E,Re,mu_e,rn,xp,y,z), ...
-    Fz(J2_E,J3_E,J4_E,J5_E,Re,mu_e,rn,xp,y,z)]; %j perturbing forces from Earth
-Sat_grav_jm = [Fx(J2_M,J3_M,J4_M,J5_M,MR,mu_m,rn,xp,y,z),...
-    Fy(J2_M,J3_M,J4_M,J5_M,MR,mu_m,rn,xp,y,z),...
-    Fz(J2_M,J3_M,J4_M,J5_M,MR,mu_m,rn,xp,y,z)];
+Sat_grav_je = [FEx(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(ESR),ESR(1),ESR(2),ESR(3)),...
+    FEy(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(ESR),ESR(1),ESR(2),ESR(3)), ...
+    FEz(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(ESR),ESR(1),ESR(2),ESR(3))]; %j perturbing forces from Earth
+MSR = Sat_X - Moon_X;
+if grav_type == 'f'
+    try
+        Sat_grav_jm = [FMx(MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3)),...
+        FMy(MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3)),...
+        FMz(MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3))];
+    catch
+        fprintf('Error!');
+        return;
+    end
+else
+    Sat_grav_jm = [FEx(J2_M,J3_M,J4_M,J5_M,MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3)),...
+        FEy(J2_M,J3_M,J4_M,J5_M,MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3)),...
+        FEz(J2_M,J3_M,J4_M,J5_M,MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3))];
+end
 Xdot(34:36) = Sat_grav_a + Sat_grav_je + Sat_grav_jm + F_srp./PM(1); %sat
 Xdot(37:39) = a(2,:); %sun
 Xdot(40:42) = a(3,:); %mercury
@@ -547,9 +606,9 @@ Xdot(43:45) = a(4,:); %venus
 Xdot(46:48) = a(5,:); %earth
 Moon_grav_a = a(6,:); %grav accel
 EMR = Moon_X - Earth_X;
-Moon_grav_je = [Fx(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(EMR),EMR(1),EMR(2),EMR(3)),...
-    Fy(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(EMR),EMR(1),EMR(2),EMR(3)), ...
-    Fz(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(EMR),EMR(1),EMR(2),EMR(3))];%j perturbing forces
+Moon_grav_je = [FEx(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(EMR),EMR(1),EMR(2),EMR(3)),...
+    FEy(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(EMR),EMR(1),EMR(2),EMR(3)), ...
+    FEz(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(EMR),EMR(1),EMR(2),EMR(3))];%j perturbing forces
 Xdot(49:51) = Moon_grav_a + Moon_grav_je; %moon
 Xdot(52:54) = a(7,:); %mars
 Xdot(55:57) = a(8,:); %jupiter
@@ -606,9 +665,8 @@ if (maint)
         a = ra./(1+norm(e));
         T = pi*a^1.5/sqrt(mu_m);
         
-        % This is a horrible hack but the signs for this inclination burn
-        % are wrong and I don't know why
-        if (t < 309*86400 && t > 308*86400)
+        % Switch signs if first burn is at descending node
+        if v(3) < 0
             dv = -dv;
         end
         dvTime = [t,t+T];

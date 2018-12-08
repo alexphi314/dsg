@@ -606,9 +606,8 @@ if (maint)
         a = ra./(1+norm(e));
         T = pi*a^1.5/sqrt(mu_m);
         
-        % This is a horrible hack but the signs for this inclination burn
-        % are wrong and I don't know why
-        if (t < 309*86400 && t > 308*86400)
+        % Switch signs if first burn is at descending node
+        if v(3) < 0
             dv = -dv;
         end
         dvTime = [t,t+T];

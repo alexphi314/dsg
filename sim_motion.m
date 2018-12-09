@@ -331,10 +331,11 @@ for k = 1:size(X,2)
         indx = times(k);
         rdsg = Sat_X(indx,:) - Earth_X(indx,:);
         sv = Sat_V(indx,:) - Earth_V(indx,:);
-        try
-            [Vi,Vf] = lambertProblemBasicSolution(mu_e,ri_J',rdsg,Y(j));
-        catch
-            fprintf('1 TOF: %.3f\n',Y(j));
+        %[Vi,Vf] = lambertProblemBasicSolution(mu_e,ri_J',rdsg,Y(j));
+        tof = Y(j)./86400;
+        [Vi,Vf,~,fl] = lambert(ri_J',rdsg,tof,0,mu_e);
+        if (fl ~= 1)
+            fprintf('Error in E DSG lambert\n');
         end
         satdvs(j,k) = abs(norm(Vi) - norm(vi_p)) + abs(norm(Vf) - norm(sv));
     end
@@ -354,17 +355,22 @@ for k = 1:size(X2,2)
         
         ris = ri_J' + Earth_X(indx,:);
         vis = vi_p' + Earth_V(indx,:);
-        
-        try
-            [emVi,emVf] = lambertProblemBasicSolution(mu_s,ris,Mars_X(indx,:),Y2(j));
-            emdv = abs(norm(emVi)-norm(vis)) + abs(norm(emVf)-norm(Mars_V(indx,:)));
-        
-            [mmVi,mmVf] = lambertProblemBasicSolution(mu_s,Sat_X(indx,:),Mars_X(indx,:),Y2(j));
-            mmdv = abs(norm(mmVi)-norm(Sat_V(indx,:))) + abs(norm(mmVf)-norm(Mars_V(indx,:)));
-        
-        catch
+        tof = Y2(j)./86400;
+        %[emVi,emVf] = lambertProblemBasicSolution(mu_s,ris,Mars_X(indx,:),Y2(j));
+        [emVi,emVf,~,fl] = lambert(ris,Mars_X(indx,:),tof,0,mu_s);
+        if (fl ~= 1)
+            fprintf('Error in em lambert\n');
             continue;
         end
+        emdv = abs(norm(emVi)-norm(vis)) + abs(norm(emVf)-norm(Mars_V(indx,:)));
+
+        %[mmVi,mmVf] = lambertProblemBasicSolution(mu_s,Sat_X(indx,:),Mars_X(indx,:),Y2(j));
+        [mmVi,mmVf,~,fl] = lambert(Sat_X(indx,:),Mars_X(indx,:),tof,0,mu_s);
+        if (fl ~= 1)
+            fprintf('Error in mm lambert\n');
+            continue;
+        end
+        mmdv = abs(norm(mmVi)-norm(Sat_V(indx,:))) + abs(norm(mmVf)-norm(Mars_V(indx,:)));
         emdvs(j,k) = emdv;
         mmdvs(j,k) = mmdv;
     end

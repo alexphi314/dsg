@@ -1,6 +1,8 @@
 function out = getv(x,plan,type)
 % get_r(x,num,type)
 % Given vector x and number in matrix, return vector
+% Knowing the format of the long vectors, given a name and type return
+% Just the component of the vector corresponding to that name
 
 switch plan
     case 'Sun'

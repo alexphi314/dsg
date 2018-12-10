@@ -4,6 +4,7 @@ function U = gen_pot(C,S,p)
 %     p -> max degree of gravity field
 %     U -> symbolic expression for potential
 %          in terms of x y z Rs r mu
+%          Spherical Harmonic expansion for potential
 
 syms x y z Rs r mu;
 U = 0;

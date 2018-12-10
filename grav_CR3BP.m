@@ -1,4 +1,6 @@
 function Xdot = grav_CR3BP(~,X)
+%Acceleration due to gravity in CR3BP
+%For use with ode45
 global rho;
 
 x = X(1);

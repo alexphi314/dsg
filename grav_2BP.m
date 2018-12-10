@@ -1,4 +1,5 @@
 function Xdot = grav_2BP(~,x)
+%Acceleration due to gravity in 2BP
 global mu_m;
 mu = mu_m;
 

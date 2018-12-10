@@ -18,6 +18,7 @@ NM = 102.4e24;
 Sat_Mass = 0.5*419725; %kg, half mass of ISS
 PM = [Sat_Mass,SM,MerM,VM,EM,MM,MarM,JM,SatrM,UM,NM];
 
+%Constants
 EMR = 384399; %km
 ER = 6378; %km
 MR = 1738; %km
@@ -31,6 +32,7 @@ mu_s = G*SM;
 Re = 6378;
 sa_A = 625; %m2, area of solar array on DSG (1/4 ISS solar area area)
 
+% Delta-V Variable Initialization
 global maint grav_type dvTime ref_r ref_i dv_sum dvMag dvType dv_count last_burn avg_rs avg_is avg_es;
 global pdv_t pdv_m;
 maint = 1; %enable to maintain the equatorial circular orbit around the Moon
@@ -55,6 +57,7 @@ else
     mt = '';
 end
 
+%J2-J5 Coefficient Delcaration
 J2_E  = 0.10826360229840e-02;
 J3_E = -0.25324353457544e-05;
 J4_E = -0.16193312050719e-05;
@@ -67,7 +70,7 @@ J5_M = 2.2378531356778999e-07;
 J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
-%te = 86400*20;
+%te = 86400*1;
 te = 86400*365.25;
 dt = 60;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
@@ -90,6 +93,7 @@ FMx = matlabFunction(UMx);
 FMy = matlabFunction(UMy);
 FMz = matlabFunction(UMz);
 
+%Generate potential due to J2-J5 forces, not a spherical harmonic expansion
 syms mu Rs J2s J3s J4s J5s;
 p2 = legendre(2,0);
 p3 = legendre(3,0);
@@ -106,6 +110,7 @@ FEz = matlabFunction(UEz);
 fprintf('Gravity field generated\n');
 
 %% Inertial Frame
+%Define initial conditions
 %Assume starting time is 2026-06-01
 %J2000 reference frame
 %From JPL Horizons
@@ -139,6 +144,7 @@ Uranus_v0 = [-6.021071169932810E+00, 2.677844281306985E+00, 1.258042487010688E+0
 Neptune_x0 = [4.466094765331440E+09, 1.780455669690870E+08, -3.831483375880877E+07];
 Neptune_v0 = [-2.151376876037164E-01, 5.056825836277882E+00, 2.074789183973950E+00];
 
+%Define DSG initial condition
 r = ref_r;
 v = sqrt(mu_m/r);
 Sat_peri_r = [r,0,0]';
@@ -150,6 +156,7 @@ Sat_J2000 = Op_g*Sat_peri_r;
 Sat_J2000_v = Op_g*Sat_peri_v; 
 T = 2*pi*r^1.5/sqrt(mu_m);
 
+%% Simulate using ode45
 %Format: [Sat, Sun, Mercury, Venus, Earth, Moon, Mars, Jupiter, Saturn, Uranus, Neptune]
 
 Sat_x0 = Sat_J2000'+Moon_x0;
@@ -161,6 +168,7 @@ v0 = [Sat_v0';Sun_v0';Mercury_v0';Venus_v0';Earth_v0';Moon_v0';Mars_v0';...
 X0 = [x0;v0;];
 [T_J,E_J] = ode_helper(@grav_J,0,te,dt,X0,options);
 
+%Get results
 Sat_X = getv(E_J,'Sat','r');
 Sun_X = getv(E_J,'Sun','r');
 Mercury_X = getv(E_J,'Mercury','r');
@@ -184,6 +192,8 @@ Saturn_V = getv(E_J,'Saturn','v');
 Uranus_V = getv(E_J,'Uranus','v');
 Neptune_V = getv(E_J,'Neptune','v');
 
+%% Plotting
+%Plot locations of all bodies over the simulation
 figure;
 hold on; axis equal;
 plot3(Mercury_X(:,1)-Sun_X(:,1),Mercury_X(:,2)-Sun_X(:,2),Mercury_X(:,3)-Sun_X(:,3),...
@@ -210,6 +220,7 @@ legend('location','Northeast');
 fname = sprintf('Plots/%s_all_planets_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%Plot Earth, Moon, DSG
 figure;
 hold on; axis equal;
 %plot3(Earth_X(:,1)-Sun_X(:,1),Earth_X(:,2)-Sun_X(:,2),Earth_X(:,3)-Sun_X(:,3),...
@@ -225,10 +236,11 @@ legend('location','Northeast');
 fname = sprintf('Plots/%s_earth_moon_dsg_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%Plot Moon & DSG
 figure;
 hold on; axis equal;
 plot3(Sat_X(:,1)-Moon_X(:,1),Sat_X(:,2)-Moon_X(:,2),Sat_X(:,3)-Moon_X(:,3));
-[XS, YS, ZS] = sphere(30); % plot the Earth using Matlab sphere command
+[XS, YS, ZS] = sphere(30); % plot the Moon using Matlab sphere command
 hold on;
 h = surf(XS*MR, YS*MR, ZS*MR);
 rotate(h,[1,0,0],-mid);
@@ -242,6 +254,7 @@ view(3);
 fname = sprintf('Plots/%s_dsg_moon_3d_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%Plot altitude, inclination, and eccentricity over time
 rs = zeros(1,length(Sat_X));
 is = zeros(1,length(Sat_X));
 es = zeros(1,length(Sat_X));
@@ -262,7 +275,7 @@ for k = 1:length(Sat_X)
     si = acos(dot(h,[0,0,1])/norm(h))*180/pi;
     hm = cross(Moon_X(k,:),Moon_V(k,:));
     mi = acos(dot(hm,[0,0,1])/norm(hm))*180/pi;
-    is(k) = si-mi;
+    is(k) = mi - si;
     
 %     j1 = [FMx(MR,mu_m,norm(r),r(1),r(2),r(3)),...
 %     FMy(MR,mu_m,norm(r),r(1),r(2),r(3)),...
@@ -298,6 +311,7 @@ ylabel('Velocity (km/s)');
 fname = sprintf('Plots/%s_r_e_i_v_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%PLot delta-V over time
 figure;
 plot(pdv_t./86400,pdv_m.*1000);
 xlabel('Time (days)');
@@ -310,6 +324,7 @@ print(fname,'-dpng');
 %plot(j2s,'DisplayName','J gravity field');
 %legend('location','northeast');
 
+% Generate porkchop plots
 tofs = linspace(3*86400,10*86400,10);
 times = 1:(5*86400/60):length(T_J);
 [X,Y] = meshgrid(T_J(times),tofs);
@@ -376,6 +391,7 @@ for k = 1:size(X2,2)
     end
 end
 
+%Plot Earth to DSG Porkchop
 fprintf('Plotting\n');
 figure;
 contourf(X./86400,Y./86400,satdvs);
@@ -387,6 +403,7 @@ title('Earth to DSG Transfer');
 fname = sprintf('Plots/%s_earth_dsg_dv_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%Plot Earth to Mars Porkchop
 figure;
 contourf(X2./86400,Y2./86400,emdvs);
 c = colorbar;c.Label.String = 'Delta-V (km/s)';
@@ -396,6 +413,7 @@ title('Earth to Mars Transfer');
 fname = sprintf('Plots/%s_earth_Mars_dv_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%Plot DSG to Mars Porkchop
 figure;
 contourf(X2./86400,Y2./86400,mmdvs);
 c = colorbar;c.Label.String = 'Delta-V (km/s)';
@@ -405,6 +423,7 @@ title('DSG to Mars Transfer');
 fname = sprintf('Plots/%s_dsg_Mars_dv_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
 
+%Plot net gain going DSG to Mars over Earth to Mars
 figure;
 contourf(X2./86400,Y2./86400,mmdvs-emdvs);
 c = colorbar;c.Label.String = 'Delta-V (km/s)';
@@ -413,20 +432,29 @@ ylabel('Transfer Time (days)');
 title('Delta-V Savings on Transfer from DSG to Mars vs. Earth to Mars');
 fname = sprintf('Plots/%s_diff_dvs_%i.png',mt,round(te/86400));
 print(fname,'-dpng');
+
+fprintf('Total required delta-V is %.3f m/s\n',dv_sum.*1000);
+
 %% Functions
 function [T,X] = ode_helper(handle,start_time,stop_time,dt,X0g,options)
+% Wrapper function to call ode45. Implements delta-Vs between calls
+
 global maint dvTime dvMag dvType dv_sum dv_count last_burn;
 global pdv_t pdv_m;
 T = [];
 X = [];
+
 if (maint)
     tend = stop_time;
     t_sim = 0;
     
-    per10 = (stop_time - start_time)/5;
+    per10 = (stop_time - start_time)/10;
     init_tspan = start_time:dt:per10;
     [tio,Xio] = ode45(handle,init_tspan,X0g,options);
     while (t_sim < tend)
+        %If no delta-Vs planned, simulate forward 10% of the total time
+        %span
+        %Then check if a delta-V is planned
         if (isempty(dvTime))
             if (isempty(T) || T(end) < tio(end))
                 T = [T;tio];
@@ -451,6 +479,9 @@ if (maint)
             tspan = linspace(t_sim,sim_end,n);
             X0 = X(end,:);
             [tio,Xio] = ode45(handle,tspan,X0,options);
+        %If delta-Vs are planned, simulate to the moment of the burn
+        %Execute the burn
+        %Repeat steps 1 and 2 until no more burns are planned
         else
             while (~isempty(dvTime))
                 %Sim up to burn
@@ -479,6 +510,8 @@ if (maint)
                 X = [X;Xio];
                 t_sim = tio(end);
                 
+                %Execute a altitude-raising burn (r), inclination lowering
+                %(i) or eccentricity lowering (e)
                 type = dvType(1);
                 if (type == 'r')
                     %Apply burn
@@ -517,14 +550,13 @@ if (maint)
                 dvMag(1) = [];
                 dvType(1) = [];
                 last_burn = t_sim;
-                dv_sum = dv_sum + dv_mag;
+                dv_sum = dv_sum + abs(dv_mag);
                 dv_count = dv_count +1;
-                
-                
             end
         end
     end
 else
+    %No delta-Vs in non-maintenance mode, so run the whole time in one go
     n = (stop_time-start_time)/dt+1;
     gtspan = linspace(start_time,stop_time,n);
     [T,X] = ode45(handle,gtspan,X0g,options);
@@ -532,8 +564,12 @@ end
 end
 
 function Xdot = grav_J(t,x)
+%This is the rate of change function called by ode45
+%Calculate the force due to gravity and perturbing forces
+%Check for a needed burn and plan one if in maintenance mode
+
 global PM mu_e FEx FEy FEz Re J_E J_M MR mu_m sa_A FMx FMy FMz;
-global maint grav_type dvTime dvMag ref_r ref_i last_burn avg_rs avg_is dvType avg_es;
+global maint grav_type dvTime dvMag ref_r last_burn avg_rs avg_is dvType avg_es;
 
 Xdot = zeros(66,1);
 x = x';
@@ -550,6 +586,7 @@ Saturn_X = getv(x,'Saturn','r');
 Uranus_X = getv(x,'Uranus','r');
 Neptune_X = getv(x,'Neptune','r');
 
+%% Force due to Gravity
 X = [Sat_X;Sun_X;Mercury_X;Venus_X;Earth_X;Moon_X;Mars_X;Jupiter_X;Saturn_X;...
     Uranus_X;Neptune_X;];
 M = PM;
@@ -591,6 +628,8 @@ Sat_grav_je = [FEx(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(ESR),ESR(1),ESR(2),ESR(3)),.
     FEy(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(ESR),ESR(1),ESR(2),ESR(3)), ...
     FEz(J2_E,J3_E,J4_E,J5_E,Re,mu_e,norm(ESR),ESR(1),ESR(2),ESR(3))]; %j perturbing forces from Earth
 MSR = Sat_X - Moon_X;
+%If f, use the spherical harmonic expansion for perturbing forces
+%Else, use the closed form just using J2-J5 defined above
 if grav_type == 'f'
     try
         Sat_grav_jm = [FMx(MR,mu_m,norm(MSR),MSR(1),MSR(2),MSR(3)),...
@@ -622,6 +661,7 @@ Xdot(58:60) = a(9,:); %saturn
 Xdot(61:63) = a(10,:); %uranus
 Xdot(64:66) = a(11,:); %neptune
 
+%If maintenance, check if the orbit needs to be corrected with a burn
 if (maint)
     r = Sat_X - Moon_X;
     v = getv(x,'Sat','v') - getv(x,'Moon','v');
@@ -646,6 +686,7 @@ if (maint)
     avg_es(1) = [];
     avg_es(10) = norm(e);
     rn = norm(r);
+    %Check altitude
     if (mean(avg_rs) < ref_r - 2 && isempty(dvTime) && t-last_burn > 300 ...
             && mean(avg_es) < 0.02) %need to boost the radius
         ra = ref_r+1;
@@ -662,6 +703,7 @@ if (maint)
         dvMag = [dv1,dv2];
         dvType = ['r','r'];
         fprintf('Burn 1 at %.3f and Burn 2 at %.3f\n',t./86400,(t+T)./86400);
+    %Check inclination
     elseif (mean(avg_is) > 0.5 && isempty(dvTime) && t-last_burn > 300 ...
             && dec < 0.01 && dec > -0.01) 
         dv = 2*norm(v)*sind(i/2);
@@ -679,6 +721,7 @@ if (maint)
         dvMag = [dv/2,-dv/2];
         dvType = ['i','i'];
         fprintf('Inc Burn at %.3f and %.3f\n',t./86400,(t+T)./86400);
+    %Check eccentricity
     elseif (mean(avg_es) > 0.02 && isempty(dvTime) && t-last_burn > 300 ...
             && thet > -5 && thet < 5)
         circ_v = sqrt(mu_m./rn);

@@ -71,7 +71,7 @@ J_M = [J2_M,J3_M,J4_M,J5_M];
 
 N = 1000;
 %te = 86400*1;
-te = 86400*365.25;
+te = 86400*780;
 dt = 60;
 options = odeset('AbsTol',1e-9,'RelTol',1e-7);
 
@@ -425,7 +425,7 @@ print(fname,'-dpng');
 
 %Plot net gain going DSG to Mars over Earth to Mars
 figure;
-contourf(X2./86400,Y2./86400,mmdvs-emdvs);
+contourf(X2./86400,Y2./86400,emdvs-mmdvs);
 c = colorbar;c.Label.String = 'Delta-V (km/s)';
 xlabel('Simulation Time (days)');
 ylabel('Transfer Time (days)');

@@ -542,7 +542,7 @@ if (maint)
                 end
                 
                 %Track burn for plotting
-                pdv_t = [pdv_t t_sim];
+                pdv_t = [pdv_t dvTime(1)];
                 pdv_m = [pdv_m pdv_m(end)+abs(dvMag(1))];
                 
                 %Remove burn
